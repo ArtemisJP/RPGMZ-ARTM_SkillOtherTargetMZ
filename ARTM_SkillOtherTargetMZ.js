@@ -8,6 +8,7 @@
 // 1.0.0 初版
 // 1.1.0 MP不足でもスキルが使用できてしまう不具合を修正
 //       リファクタリングを実施
+// 1.1.1 アクター選択画面の更新漏れを修正
 // ====================================================
 /*:ja
  * @target MZ
@@ -183,8 +184,8 @@
         const item = this.item();
         if (DataManager.isSkill(item) && item.meta[TAG_NAME]) {
             GTmp.setSOT([STAGE.Snd], [true]);
-            this._actorWindow.refresh();
         }
+        this._actorWindow.refresh();
         _Scene_ItemBase_showActorWindow.call(this);
     };
 
