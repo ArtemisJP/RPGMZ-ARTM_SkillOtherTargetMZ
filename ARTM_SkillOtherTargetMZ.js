@@ -9,6 +9,7 @@
 // 1.1.0 MP不足でもスキルが使用できてしまう不具合を修正
 //       リファクタリングを実施
 // 1.1.1 アクター選択画面の更新漏れを修正
+// 1.1.2 リファクタリングを実施
 // ====================================================
 /*:ja
  * @target MZ
@@ -36,18 +37,18 @@
 
     const TAG_NAME = "SOT_STATE";
     const TAG_VALUE = "VALID";
-    const STAGE = {"Non":0, "Fst": 1, "Snd":2, "Trd":3};
-    STAGE["Exp"] = Object.keys(STAGE).length; 
-    let GTmp;
+    const gST = {"N":0, "F": 1, "S":2, "T":3, "E":4};
+    let gTmp;
     
-
+    //-----------------------------------------------------------------------------
+    // Game_Temp
+    //
     const _Game_Temp_initialize = Game_Temp.prototype.initialize;
     Game_Temp.prototype.initialize = function() {
         _Game_Temp_initialize.call(this);
-        this._isExceptSOT = false;
         this._SOT = [false, false, false, false];
         this._listSOT = [];
-        GTmp = this;
+        gTmp = this;
     };
 
     Game_Temp.prototype.getSOT = function(index) {
@@ -65,14 +66,13 @@
     Game_Temp.prototype.doListExceptSOT = function(except) {
         this._listSOT = this._listSOT.filter(v => v !== except);
         if (this._listSOT.length === 0) {
-            this.setSOT([STAGE.Fst], [false]);
+            this.setSOT([gST.F], [false]);
         }
     };
 
-    Game_Temp.prototype.findSOT = function(subject) {
-        return this.listSOT().includes(subject);
-    };
-    
+    //-----------------------------------------------------------------------------
+    // Game_Action
+    //
     Game_Action.prototype.isSOT = function() {
         return(
             DataManager.isSkill(this.item()) &&
@@ -83,73 +83,58 @@
     const _Game_Action_makeTargets = Game_Action.prototype.makeTargets;
     Game_Action.prototype.makeTargets = function() {
         const subject = this.subject();
-        const isSOT = this.isSOT();
-        let targets = this.makeTargetsSOT(subject, isSOT);
-        if (!isSOT) {
-            return targets
-        } else if (!this.isForUser() && this.isForOne()) {
-            targets = this.makeTargetsProcSOT(targets);
-        } else if (this.isForAll()) {
-            targets = targets.filter(t => {
-                return t !== subject;
-            }, this);
-        } else {
-            targets = [];
+        const targets = this.makeTargetsSOT(subject, this.isSOT());
+        if (this.isSOT()) {
+            if (!this.isForUser() && this.isForOne()) {
+                return this.makeTargetsProcSOT(targets);
+            } else if (this.isForAll()) {
+                return targets.filter(t => t !== subject);
+            }
         }
-        return targets
+        return targets;
     };
 
     Game_Action.prototype.makeTargetsSOT = function(subject, isSOT) {
-        let targets, members, index;
-        if (!!isSOT && GTmp.getSOT(STAGE.Fst) && GTmp.findSOT(subject)) {
-            const prvExp = GTmp.getSOT(STAGE.Exp)
-            GTmp.setSOT([STAGE.Exp], [false]);
+        const inListSOT = gTmp.listSOT().includes(subject);
+        let index, targets;
+        if (isSOT && gTmp.getSOT(gST.F) && inListSOT) {
+            const prvExp = gTmp.getSOT(gST.E)
+            gTmp.setSOT([gST.E], [false]);
             index = $gameParty.members().indexOf(subject);
-            GTmp.setSOT([STAGE.Exp], [true]);
-            GTmp.doListExceptSOT(subject);
+            gTmp.setSOT([gST.E], [true]);
+            gTmp.doListExceptSOT(subject);
             if (index < this._targetIndex) {
                 this._targetIndex--;
             }
             targets = _Game_Action_makeTargets.call(this);
-            GTmp.setSOT([STAGE.Exp], [prvExp]);
-        } else {
-            targets = _Game_Action_makeTargets.call(this);
+            gTmp.setSOT([gST.E], [prvExp]);
+            return targets;
         }
-        return targets;
+        return _Game_Action_makeTargets.call(this);
    };
 
     Game_Action.prototype.makeTargetsProcSOT = function(targets) {
-        if (this.friendsUnit()._actors) {
-            return this.makeTargetsActorProcSOT() || targets;
-        } else if (this.friendsUnit()._enemies) {
-            return this.makeTargetsEnemyProcSOT();
-        } else {
-            return [];
+        if (this.friendsUnit()._enemies) {
+            const unit = this.friendsUnit();
+            const enemiesSave = [...unit._enemies];
+            unit._enemies = enemiesSave.filter(a => {
+                return a !== this.subject();
+            });
+            targets = [unit.randomTarget()]
+            unit._enemies = enemiesSave
         }
-    }
-
-    Game_Action.prototype.makeTargetsActorProcSOT = function() {
-        return null;
-    }
-
-    Game_Action.prototype.makeTargetsEnemyProcSOT = function() {
-        const unit = this.friendsUnit();
-        const enemiesSave = [...unit._enemies];
-        let targets;
-        unit._enemies = enemiesSave.filter(a => {
-            return a !== this.subject();
-        });
-        targets = [unit.randomTarget()]
-        unit._enemies = enemiesSave
         return targets;
     }
 
+    //-----------------------------------------------------------------------------
+    // Game_Party
+    //
     const _Game_Party_battleMembers = Game_Party.prototype.battleMembers;
     Game_Party.prototype.battleMembers = function() {
         const members = _Game_Party_battleMembers.call(this);
-        if (GTmp.getSOT(STAGE.Exp)) {
+        if (gTmp.getSOT(gST.E)) {
             const subject =
-                GTmp.getSOT(STAGE.Non) ?
+                gTmp.getSOT(gST.N) ?
                 BattleManager._currentActor :
                 BattleManager._subject;
             return(
@@ -163,7 +148,7 @@
     const _Game_Party_allMembers = Game_Party.prototype.allMembers;
     Game_Party.prototype.allMembers = function() {
         const members = _Game_Party_allMembers.call(this);
-        if (GTmp.getSOT(STAGE.Snd)) {
+        if (gTmp.getSOT(gST.S)) {
             const scene = SceneManager._scene;
             const actor = scene._statusWindow._actor;
             return members.filter(t => t !== actor);
@@ -171,19 +156,25 @@
         return members;
     };
 
+    //-----------------------------------------------------------------------------
+    // Spriteset_Battle
+    //
     const _Spriteset_Battle_updateActors = Spriteset_Battle.prototype.updateActors;
     Spriteset_Battle.prototype.updateActors = function() {
-        const prvExp = GTmp.getSOT(STAGE.Exp);
-        GTmp.setSOT([STAGE.Exp], [false]);
+        const prvExp = gTmp.getSOT(gST.E);
+        gTmp.setSOT([gST.E], [false]);
         _Spriteset_Battle_updateActors.call(this);
-        GTmp.setSOT([STAGE.Exp], [prvExp]);
+        gTmp.setSOT([gST.E], [prvExp]);
     };
 
+    //-----------------------------------------------------------------------------
+    // Scene_ItemBase
+    //
     const _Scene_ItemBase_showActorWindow = Scene_ItemBase.prototype.showActorWindow;
     Scene_ItemBase.prototype.showActorWindow = function() {
         const item = this.item();
         if (DataManager.isSkill(item) && item.meta[TAG_NAME]) {
-            GTmp.setSOT([STAGE.Snd], [true]);
+            gTmp.setSOT([gST.S], [true]);
         }
         this._actorWindow.refresh();
         _Scene_ItemBase_showActorWindow.call(this);
@@ -191,12 +182,15 @@
 
     const _Scene_ItemBase_hideActorWindow = Scene_ItemBase.prototype.hideActorWindow;
     Scene_ItemBase.prototype.hideActorWindow = function() {
-        if (GTmp.getSOT(STAGE.Snd)) {
-            GTmp.setSOT([STAGE.Snd], [false]);
+        if (gTmp.getSOT(gST.S)) {
+            gTmp.setSOT([gST.S], [false]);
         }
         _Scene_ItemBase_hideActorWindow.call(this);
     };
 
+    //-----------------------------------------------------------------------------
+    // Game_BattlerBase
+    //
     const _Game_BattlerBase_meetsSkillConditions = Game_BattlerBase.prototype.meetsSkillConditions;
     Game_BattlerBase.prototype.meetsSkillConditions = function(skill) {
         const defRet = _Game_BattlerBase_meetsSkillConditions.call(this, skill);
@@ -209,33 +203,36 @@
     Game_BattlerBase.prototype.meetsSkillConditionsSOT = function(skill) {
         let length;
         if ($gameParty.inBattle()) {
-            const prvInfo = [GTmp.getSOT(STAGE.Non), GTmp.getSOT(STAGE.Exp)];
-            GTmp.setSOT([STAGE.Non, STAGE.Exp], [true, true]);
+            const prvInfo = [gTmp.getSOT(gST.N), gTmp.getSOT(gST.E)];
+            gTmp.setSOT([gST.N, gST.E], [true, true]);
             length = $gameParty.battleMembers().length;
-            GTmp.setSOT([STAGE.Non, STAGE.Exp], [prvInfo[0], prvInfo[1]]);
+            gTmp.setSOT([gST.N, gST.E], [prvInfo[0], prvInfo[1]]);
         } else {
-            const prvState = GTmp.getSOT(STAGE.Snd);
-            GTmp.setSOT([STAGE.Snd], [true]);
+            const prvState = gTmp.getSOT(gST.S);
+            gTmp.setSOT([gST.S], [true]);
             length = $gameParty.allMembers().length;
-            GTmp.setSOT([STAGE.Snd], [prvState]);
+            gTmp.setSOT([gST.S], [prvState]);
         }
         return length > 0;
     };
 
+    //-----------------------------------------------------------------------------
+    // Scene_Battle
+    //
     const _Scene_Battle_onActorOk = Scene_Battle.prototype.onActorOk;
     Scene_Battle.prototype.onActorOk = function() {
-        if (GTmp.getSOT(STAGE.Exp)) {
-            GTmp.setSOT([STAGE.Exp], [false]);
+        if (gTmp.getSOT(gST.E)) {
+            gTmp.setSOT([gST.E], [false]);
             const members = $gameParty.battleMembers();
             const actor = BattleManager.actor();
             const index = members.indexOf(actor);
-            GTmp.setSOT([STAGE.Fst], [true]);
-            GTmp.listSOT().push(actor);
-            if (!GTmp.getSOT(STAGE.Trd) &&
+            gTmp.setSOT([gST.F], [true]);
+            gTmp.listSOT().push(actor);
+            if (!gTmp.getSOT(gST.T) &&
                 index <= this._actorWindow.index()) {
                  this._actorWindow._index++;
             } else {
-                GTmp.setSOT([STAGE.Trd], [false]);
+                gTmp.setSOT([gST.T], [false]);
             }
         }
         _Scene_Battle_onActorOk.call(this);
@@ -244,8 +241,8 @@
     const _Scene_Battle_onActorCancel= Scene_Battle.prototype.onActorCancel;
     Scene_Battle.prototype.onActorCancel = function() {
         _Scene_Battle_onActorCancel.call(this);
-        if (GTmp.getSOT(STAGE.Exp)) {
-            GTmp.setSOT([STAGE.Exp], [false]);
+        if (gTmp.getSOT(gST.E)) {
+            gTmp.setSOT([gST.E], [false]);
         }
     };
 
@@ -256,7 +253,7 @@
         if (skill.meta[TAG_NAME] === TAG_VALUE) {
             action.setSkill(skill.id);
             if (action.needsSelection()) {
-                GTmp.setSOT([STAGE.Exp], [true]);
+                gTmp.setSOT([gST.E], [true]);
                 BattleManager.actor().setLastBattleSkill(skill);
                 this.onSelectAction();
                 return;
@@ -265,12 +262,15 @@
         _Scene_Battle_onSkillOk.call(this);
     };
 
+    //-----------------------------------------------------------------------------
+    // Window_BattleStatus
+    //
     const _Window_BattleStatus_actor = Window_BattleStatus.prototype.actor;
     Window_BattleStatus.prototype.actor = function(index) {
-        if (GTmp.getSOT(STAGE.Exp)) {
-            GTmp.setSOT([STAGE.Non], [true]);
+        if (gTmp.getSOT(gST.E)) {
+            gTmp.setSOT([gST.N], [true]);
             const actor = _Window_BattleStatus_actor.call(this, index);
-            GTmp.setSOT([STAGE.Non], [false]);
+            gTmp.setSOT([gST.N], [false]);
             return actor;
         }
         return _Window_BattleStatus_actor.call(this, index);
@@ -278,45 +278,47 @@
 
     const _Window_BattleStatus_maxItems = Window_BattleStatus.prototype.maxItems;
     Window_BattleStatus.prototype.maxItems = function() {
-        if (GTmp.getSOT(STAGE.Exp)) {
-            GTmp.setSOT([STAGE.Non], [true]);
+        if (gTmp.getSOT(gST.E)) {
+            gTmp.setSOT([gST.N], [true]);
             const maxItems = _Window_BattleStatus_maxItems.call(this);
-            GTmp.setSOT([STAGE.Non], [false]);
+            gTmp.setSOT([gST.N], [false]);
             return maxItems;
         }
         return _Window_BattleStatus_maxItems.call(this);
     };
 
-    // overridable
+    //-----------------------------------------------------------------------------
+    // Window_BattleActor
+    //
     const _Window_BattleActor_processTouch = Window_BattleActor.prototype.processTouch;
     Window_BattleActor.prototype.processTouch = function() {
-        if (!GTmp.getSOT(STAGE.Exp)) {
+        if (!gTmp.getSOT(gST.E)) {
             _Window_BattleActor_processTouch.call(this);
             return;
         }
         Window_BattleStatus.prototype.processTouch.call(this);
+        const target = gTmp.touchTarget()
         if (this.isOpenAndActive()) {
-            const target = GTmp.touchTarget();
-            if (target) {
-                const _members = $gameParty.battleMembers();
-                const index = _members.indexOf(target);
-                const subject = BattleManager._currentActor;
-                const members = _members.filter(bm => {
-                    return bm !== subject;
-                });
-                if (members.includes(target)) {
-                    this.select(members.indexOf(target));
-                    if (GTmp.touchState() === "click") {
-                        if (this._index < index) {
-                            this._index++;
-                            GTmp.setSOT([STAGE.Trd], [true]);
-                        }
-                        this.processOk();
-                    }
+            this.processTouchSOT(target);
+        }
+    };
+    
+    Window_BattleActor.prototype.processTouchSOT = function(target) {
+        let members = $gameParty.battleMembers();
+        members = members.filter(bm => {
+            return bm !== BattleManager._currentActor;
+        });
+        if (members.includes(target)) {
+            this.select(members.indexOf(target));
+            if (gTmp.touchState() === "click") {
+                if (this._index < members.indexOf(target)) {
+                    this._index++;
+                    gTmp.setSOT([gST.T], [true]);
                 }
-                GTmp.clearTouchState();
+                this.processOk();
             }
         }
+        gTmp.clearTouchState();
     };
 
 })();
